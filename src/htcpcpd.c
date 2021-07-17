@@ -41,7 +41,7 @@ void delay(unsigned int millis)
 }
 
 // struct for making file handling easier and function for loading files safely (I think this is using GNU extensions,
-// so if you compile this with something else then you're on your own
+// so if you compile this with something else then you're on your own)
 
 typedef struct
 {
