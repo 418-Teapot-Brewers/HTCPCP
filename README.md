@@ -9,7 +9,7 @@ a month down the line we're exhausted, JP's addicted to caffiene more than ever 
 We at least think this was worth the time, and maybe you might think so too. If so we've done our job and sucsessfully passed on the lessons of meme appreciation to a new generation.
 If you want any more info, a chat, or even a brew (not with this teapot though) then pop us an email at [418teapotbrewers@gmail.com](mailto:418teapotbrewers@gmail.com), or contact us through the various social media connected to our GitHub accounts.
 
-Oh, one more thing: yes, this is an HTTP server. Don't use it as one. It's written in pure C and doesn't use config files, so it's a bit of a nightmare to set up and use. Much better alternatives exist. This was a fun project, not a sensible one, and I would strongly advise against using it for anything important.
+Oh, one more thing: yes, this is an HTTP server. Don't use it as one. It's written in pure C and doesn't use config files, so it's a bit of a nightmare to set up and use. Much better alternatives exist. This was a fun project, not a sensible one, and we would strongly advise against using it for anything important.
 
 Code inspired by (and partially nicked from) [saljs's implementation](https://github.com/saljs/htcpcp).
 
