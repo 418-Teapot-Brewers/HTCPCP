@@ -503,7 +503,7 @@ void * hardwareHandler(void * arg)
         
         if (potinfo.is_brewing == 1 && potinfo.is_teapot == 1)
         {
-            error("Glitch in the matrix"); // teapots can't brew
+            error("Glitch in the matrix"); // teapots can't brew coffee
             break;
         }
         delay(10);
