@@ -1,19 +1,14 @@
 CC=gcc
 CFLAGS=--std=gnu17 -Wall
+LDFLAGS=-pthread
 
-ifeq ($(DEBUG),1)
-	CFLAGS += -g -DDEBUG
-else
-	CFLAGS += -O3
-endif
+all: htcpcpd
 
-all: httpd
+htcpcpd: src/htcpcpd.c
+	$(CC) $(CFLAGS) $(LDFLAGS) src/htcpcpd.c -o htcpcpd
 
-httpd: src/httpd.c src/httpd.h src/config.c src/config.h
-	$(CC) $(CFLAGS) src/httpd.c src/config.c -o httpd
-
-install: httpd
-	cp httpd /usr/local/bin/
+install: htcpcpd
+	cp htcpcpd /usr/local/bin/
 
 clean:
-	rm -f httpd
+	rm -f htcpcpd
