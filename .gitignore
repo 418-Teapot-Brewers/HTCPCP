@@ -1,2 +1,4 @@
-htcpcpd
+httpd
 *.exe
+*.stackdump
+www
