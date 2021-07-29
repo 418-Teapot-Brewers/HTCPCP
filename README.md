@@ -18,3 +18,6 @@ Code inspired by (and partially nicked from) [saljs's implementation](https://gi
 
 ## Running
 `(sudo) ./htcpcpd`
+
+## Licensing
+[Twemoji](https://twemoji.twitter.com/) graphics (used for favicon.png) made by Twitter and other contributors, licensed under [CC-BY 4.0](https://creativecommons.org/licenses/by/4.0/).
