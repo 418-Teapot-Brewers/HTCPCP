@@ -49,22 +49,35 @@ typedef struct
     size_t filesize;
 } loaded_file;
 
-void load_file(char * filename, loaded_file * dest)
+void load_file(char * filename, loaded_file * dest, char * method)
 {
-    FILE * file = fopen(filename, "rb");
+    FILE * file;
+    static const char files_dir[] = "www";
     size_t fsize, rv;
     char * buf;
+    char filename_qualified[strlen(files_dir) + strlen(filename) + 2];
+    
+    sprintf(filename_qualified, "%s/%s", files_dir, filename);
+    file = fopen(filename_qualified, method);
+    
+    if (file == NULL)
+    {
+        dest->filedata = NULL;
+        dest->filesize = 0;
+        return;
+    }
     
     fseek(file, 0, SEEK_END);
     fsize = ftell(file);
     rewind(file);
     
-    buf = malloc(fsize * sizeof(char));
+    buf = malloc(fsize);
     
     if (buf == NULL)
     {
         dest->filedata = NULL;
         dest->filesize = 0;
+        fclose(file);
         return;
     }
     
@@ -74,43 +87,50 @@ void load_file(char * filename, loaded_file * dest)
         free(buf);
         dest->filedata = NULL;
         dest->filesize = 0;
-        return;
+    }
+    else
+    {
+        dest->filedata = buf;
+        dest->filesize = fsize;
     }
     
-    dest->filedata = buf;
-    dest->filesize = fsize;
+    fclose(file);
+    
+    return;
 }
 
 // data type and enum definitions for all the files that the site will handle
 
 typedef enum
 {
-    IMAGE,
-    HTML,
+    TERMINATOR = 0,
+    BIN,
+    TEXT,
     NOPE,
     REDIR,
-} Filetype;
+} ContentType;
 
 typedef struct
 {
     char * filepath;
     char * serverpath;
-    loaded_file * file;
-    Filetype type;
+    char * mime;
+    loaded_file file;
+    ContentType type;
     unsigned short status;
 } UsedFile;
 
 UsedFile files[] = {
-    { "index.html", "/index.html", NULL, HTML, 418 }, // main page, returns status 418, file on disk is index.html
-    { "frens.html", "/frens.html", NULL, HTML, 200 }, // frens page, returns status 200, file on disk is frens.html
-    { "images/fren0.png", "/images/fren0.png", NULL, IMAGE, 200 }, // images
-    { "images/fren1.png", "/images/fren1.png", NULL, IMAGE, 200 }, // all
-    { "images/fren2.png", "/images/fren2.png", NULL, IMAGE, 200 }, // return
-    { "images/fren3.png", "/images/fren3.png", NULL, IMAGE, 200 }, // 200
-    { "images/me.png", "/images/me.png", NULL, IMAGE, 418 }, // except this one! it's a teapot, so, well, it's a teapot
-    { "/favicon.png", "/favicon.ico", NULL, REDIR, 301 }, // redirect favicon.ico to favicon.png
-    { "favicon.png", "/favicon.png", NULL, IMAGE, 200 }, // favicon, returns status 200, file on disk is favicon.png
-    { "Terminator", NULL, NULL, HTML, 0xFFFF }, // structure terminator
+    { "index.html", "/index.html", "text/html", {}, TEXT, 418 }, // main page, returns status 418, file on disk is index.html
+    { "frens.html", "/frens.html", "text/html", {}, TEXT, 200 }, // frens page, returns status 200, file on disk is frens.html
+    { "images/fren0.png", "/images/fren0.png", "image/png", {}, BIN, 200 }, // images
+    { "images/fren1.png", "/images/fren1.png", "image/png", {}, BIN, 200 }, // all
+    { "images/fren2.png", "/images/fren2.png", "image/png", {}, BIN, 200 }, // return
+    { "images/fren3.png", "/images/fren3.png", "image/png", {}, BIN, 200 }, // 200
+    { "images/me.png", "/images/me.png", "image/png", {}, BIN, 418 }, // except this one! it's a teapot, so, well, it's a teapot
+    { "/favicon.png", "/favicon.ico", NULL, {}, REDIR, 301 }, // redirect favicon.ico to favicon.png
+    { "favicon.png", "/favicon.png", "image/png", {}, BIN, 200 }, // favicon, returns status 200, file on disk is favicon.png
+    { "Terminator", NULL, NULL, {}, TERMINATOR, 0xFFFF }, // structure terminator
 };
 
 // now for the HTCPCP code! very little of this is tested, since our server is a teapot
@@ -195,7 +215,7 @@ void readHeader(char ** method, char ** path, char ** protocol, char * instring)
     for (unsigned char j = 0; j < 3; j++)
     {
         bufsize = 256;
-        tmp = malloc(bufsize * sizeof(char)); // dynamic memory allocation is fun
+        tmp = malloc(bufsize); // dynamic memory allocation is fun
         
         if (tmp == NULL)
         {
@@ -220,9 +240,13 @@ void readHeader(char ** method, char ** path, char ** protocol, char * instring)
             
             bufsize *= 2;
             tmp = realloc(tmp, bufsize); // I *think* this implementation doesn't have any memory leaks
+            
+            if (tmp == NULL)
+                break;
         }
         
-        tmp = realloc(tmp, strlen(tmp) + 1);
+        if (tmp != NULL) // pointers are checked when the function returns so this is safer than it looks
+            tmp = realloc(tmp, strlen(tmp) + 1);
         
         *ptrs[j] = tmp;
         
@@ -274,6 +298,10 @@ char * handleHeaders(char * request, size_t * length)
     
     readHeader(&method, &path, &protocol, request); // read header
     
+    #if DEBUG
+    printf("%s %s %s\n", method, path, protocol);
+    #endif
+    
     if (method == NULL || path == NULL || protocol == NULL) // if something goes wrong with reading the header,
     { //                                                       return 500 Internal server error
         if (method != NULL)
@@ -287,8 +315,6 @@ char * handleHeaders(char * request, size_t * length)
         *length = strlen(response);
         return response;
     }
-    
-    // special case for /teapot subdomain, to ensure HTCPCP/1.0 compatibility if it's needed
     
     if (strcmp("/teapot", path) == 0 || strcmp(method, "GET") != 0)
     {
@@ -314,11 +340,11 @@ char * handleHeaders(char * request, size_t * length)
         {
             if (potinfo.ready == 1)
             {
-                response = buildResponse(200, "Content-type: message/coffeepot\nPot ready to brew");
+                response = buildResponse(200, "Content-type: message/coffeepot\n\nPot ready to brew");
             }
             else
             {
-                response = buildResponse(200, "Content-type: message/coffeepot\nPot not ready to brew");
+                response = buildResponse(200, "Content-type: message/coffeepot\n\nPot not ready to brew");
             }
         }
         else if (strcmp(method, "WHEN") == 0)
@@ -351,69 +377,105 @@ char * handleHeaders(char * request, size_t * length)
         }
         else
         {
-            if (cur_file->type == HTML) // process HTML files
+            #if DEBUG
+            printf("cur file: path %s, file %s, mime %s, type %d, status %d\n", cur_file->serverpath, cur_file->filepath, cur_file->mime, cur_file->type, cur_file->status);
+            #endif
+            if (cur_file->type == TEXT) // process text data
             {
-                static char htmlPage[256];
+                static const char format[] = "Content-Length: %zu\nConnection: keep-alive\nContent-Type: %s; charset=utf-8\n\n";
+                size_t headerLen;
+                char * header;
                 char * msg;
                 char * buf;
                 
-                snprintf(htmlPage, 256, "Content-Length: %ld\nConnection: keep-alive\nContent-Type: text/html; charset=utf-8\n\n", cur_file->file->filesize);
+                headerLen = snprintf(NULL, 0, format, cur_file->file.filesize, cur_file->mime) + 1;
                 
-                msg = buildResponse(cur_file->status, htmlPage);
+                header = malloc(headerLen);
                 
-                buf = malloc(strlen(msg) + cur_file->file->filesize + 1);
-                
-                if (msg == NULL || buf == NULL)
+                if (header == NULL)
                 {
-                    if (msg != NULL)
-                        free(msg);
-                    if (buf != NULL)
-                        free(buf);
-                    
-                    response = buildResponse(500, ""); // 500 Internal server error if memory allocation fails
+                    response = buildResponse(500, "");
                 }
-                
-                strcpy(buf, msg);
-                strcat(buf, cur_file->file->filedata); // text/html so strcat can be used
-                
-                free(msg);
-                
-                response = buf;
-                
+                else
+                {
+                    snprintf(header, headerLen, format, cur_file->file.filesize, cur_file->mime);
+                    
+                    msg = buildResponse(cur_file->status, header);
+                    
+                    free(header);
+                    
+                    buf = malloc(strlen(msg) + cur_file->file.filesize + 1);
+                    
+                    if (msg == NULL || buf == NULL)
+                    {
+                        if (msg != NULL)
+                            free(msg);
+                        if (buf != NULL)
+                            free(buf);
+                        
+                        response = buildResponse(500, ""); // 500 Internal server error if memory allocation fails
+                    }
+                    else
+                    {
+                        strcpy(buf, msg);
+                        strcat(buf, cur_file->file.filedata); // text so strcat can be used
+                        
+                        free(msg);
+                        
+                        response = buf;
+                    }
+                }
             }
-            else if (cur_file->type == IMAGE) // process PNG images
+            else if (cur_file->type == BIN) // process binary data
             {
-                static char htmlPage[256];
+                static const char format[] = "Connection: keep-alive\nContent-type: %s\nContent-length: %zu\n\n";
+                size_t headerLen;
+                char * header;
                 char * msg;
                 char * buf;
                 size_t len;
                 
-                snprintf(htmlPage, 256, "Connection: keep-alive\nContent-type: image/png\nContent-length: %ld\n\n", cur_file->file->filesize);
+                headerLen = snprintf(NULL, 0, format, cur_file->mime, cur_file->file.filesize) + 1;
                 
-                msg = buildResponse(cur_file->status, htmlPage);
+                header = malloc(headerLen);
                 
-                buf = malloc(strlen(msg) + cur_file->file->filesize + 1);
-                
-                if (msg == NULL || buf == NULL)
+                if (header == NULL)
                 {
-                    if (msg != NULL)
-                        free(msg);
-                    if (buf != NULL)
-                        free(buf);
-                    
-                    response = buildResponse(500, ""); // 500 Internal server error if memory allocation fails
+                    response = buildResponse(500, "");
                 }
-                
-                strcpy(buf, msg);
-                
-                len = strlen(buf); // image/png so strcat can't be used
-                memcpy(buf + strlen(buf), cur_file->file->filedata, cur_file->file->filesize);
-                
-                free(msg);
-                // server tries to autodetect length if it's not set, but it uses strlen which won't work for images
-                *length = len + cur_file->file->filesize;
-                
-                response = buf;
+                else
+                {
+                    snprintf(header, headerLen, format, cur_file->mime, cur_file->file.filesize);
+                    
+                    msg = buildResponse(cur_file->status, header);
+                    
+                    free(header);
+                    
+                    buf = malloc(strlen(msg) + cur_file->file.filesize + 1);
+                    
+                    if (msg == NULL || buf == NULL)
+                    {
+                        if (msg != NULL)
+                            free(msg);
+                        if (buf != NULL)
+                            free(buf);
+                        
+                        response = buildResponse(500, ""); // 500 Internal server error if memory allocation fails
+                    }
+                    else
+                    {
+                        strcpy(buf, msg);
+                        
+                        len = strlen(buf); // binary so strcat can't be used
+                        memcpy(buf + strlen(buf), cur_file->file.filedata, cur_file->file.filesize);
+                        
+                        free(msg);
+                        // server tries to autodetect length if it's not set, but it uses strlen which won't work for images
+                        *length = len + cur_file->file.filesize;
+                        
+                        response = buf;
+                    }
+                }
             }
             else if (cur_file->type == NOPE) // explicitly not found instead of redirecting to index.html
             {
@@ -540,18 +602,12 @@ int main(int argc, char * argv[])
     
     cur_file = files;
     
-    while (cur_file->serverpath != NULL)
+    while (cur_file->type != TERMINATOR)
     {
         if (cur_file->filepath != NULL && cur_file->type != REDIR)
         {
-            cur_file->file = malloc(sizeof(loaded_file));
-            if (cur_file->file == NULL)
-            {
-                error("Out of memory");
-            }
-            
-            load_file(cur_file->filepath, cur_file->file);
-            if (cur_file->file->filesize == 0)
+            load_file(cur_file->filepath, &cur_file->file, (cur_file->type == TEXT) ? "r" : "rb");
+            if (cur_file->file.filesize == 0)
             {
                 char msgbuf[25 + strlen(cur_file->filepath)];
                 sprintf(msgbuf, "ERROR opening file %s\n", cur_file->filepath);
@@ -584,7 +640,7 @@ int main(int argc, char * argv[])
     signal(SIGTERM, sig_handler);
     
     // comment out this line to stop it running as a daemon
-    daemon(1, 0);
+    //daemon(1, 0);
     pthread_create(&HWThread, NULL, hardwareHandler, NULL);
     
     for(;;)
@@ -626,7 +682,11 @@ int main(int argc, char * argv[])
             n = read(newsockfd, bufstart, buflen - readlen);
             if (n < 0)
             {
-                error("ERROR reading from socket");
+                //error("ERROR reading from socket");
+                // don't error on read fail! just try again!
+                free(buffer);
+                buffer = NULL;
+                break;
             }
             
             readlen = buflen;
@@ -637,7 +697,16 @@ int main(int argc, char * argv[])
             buflen *= 2;
             
             buffer = realloc(buffer, buflen);
+            if (buffer == NULL)
+                break;
         }
+        
+        if (buffer == NULL)
+        {
+            //error("ERROR out of memory on accept");
+            continue;
+        }
+        
         buffer = realloc(buffer, strlen(buffer) + 1);
         
         // process the incoming request
@@ -651,10 +720,10 @@ int main(int argc, char * argv[])
         free(return_header);
         free(buffer);
         
-        if (n < 0) 
+        /*if (n < 0) 
         {
             error("ERROR writing to socket");
-        }
+        }*/
         close(newsockfd);
     }
     
