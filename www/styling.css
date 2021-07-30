@@ -1,0 +1,27 @@
+.centre {
+    display: block;
+    margin-left: auto;
+    margin-right: auto;
+    text-align: center;
+}
+.highlight {
+    border-color: #226699;
+    color: #FFFFFF;
+}
+body {
+    background-color: #226699;
+    font-family: arial, "sans-serif";
+    color: #FFFFFF;
+}
+h1 {
+    color: #FFFFFF;
+}
+h1 span {
+    margin: 8px;
+}
+a {
+    color: #FFFFFF !important;
+}
+a span {
+    margin: 8px;
+}
