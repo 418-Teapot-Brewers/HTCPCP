@@ -130,6 +130,7 @@ UsedFile files[] = {
     { "images/me.png", "/images/me.png", "image/png", {}, BIN, 418 }, // except this one! it's a teapot, so, well, it's a teapot
     { "/favicon.png", "/favicon.ico", NULL, {}, REDIR, 301 }, // redirect favicon.ico to favicon.png
     { "favicon.png", "/favicon.png", "image/png", {}, BIN, 200 }, // favicon, returns status 200, file on disk is favicon.png
+    { "styling.css", "/styling.css", "text/css", {}, TEXT, 200 }, // css styling file
     { "Terminator", NULL, NULL, {}, TERMINATOR, 0xFFFF }, // structure terminator
 };
 
