@@ -158,63 +158,45 @@ void error(const char * msg)
     exit(1);
 }
 
-// function to read the method, path and protocol from an HTTP request, e.g.
-// GET /index.html HTTP/1.1
-// stops at newlines because this server ignores everything except that one line!
+char get_section(char ** string, char ** dest)
+{
+    size_t len;
+	
+	for (len = 0; (*string)[len] != ' ' && (*string)[len] != '\t' && (*string)[len] != '\n' && (*string)[len] != '\r' && (*string)[len] != '\0' && (*string)[len] != ':'; len++);
+	
+	*dest = strndup_wrapper(*string, len);
+	
+    *string += len;
+    
+	while (**string == ' ' || **string == '\t' || **string == '\n' || **string == '\r' || **string == ':')
+	{
+		(*string)++;
+	}
+    
+	return **string;
+}
 
-void readHeader(char ** method, char ** path, char ** protocol, char * instring)
+void parseRequest(char ** method, char ** path, char ** protocol, char * instring)
 {
     char * tmp;
-    size_t bufsize;
-    size_t i;
-    size_t index = 0;
     char ** ptrs[] = { method, path, protocol };
+    char rv;
     
     for (unsigned char j = 0; j < 3; j++)
     {
-        bufsize = 256;
-        tmp = malloc(bufsize); // dynamic memory allocation is fun
-        
-        if (tmp == NULL)
-        {
-            *ptrs[j] = NULL;
-            continue;
-        }
-        
-        i = 0;
-        
-        while (1)
-        {
-            for (; instring[index] != ' ' && instring[index] != '\n' && instring[index] != '\0' && i < bufsize; i++, index++)
-            {
-                tmp[i] = instring[index];
-            }
-            tmp[i] = '\0';
-            
-            if (i < bufsize)
-            {
-                break;
-            }
-            
-            bufsize *= 2;
-            tmp = realloc_wrapper_ignore(tmp, bufsize); // I *think* this implementation doesn't have any memory leaks
-            
-            if (tmp == NULL)
-            {
-                break;
-            }
-        }
-        
-        if (tmp != NULL) // pointers are checked when the function returns so this is safer than it looks
-        {
-            tmp = realloc_wrapper_shrink(tmp, strlen(tmp) + 1);
-        }
-        
-        *ptrs[j] = tmp;
-        
-        index++;
+        *ptrs[j] = NULL;
     }
     
+    for (unsigned char j = 0; j < 3; j++)
+    {
+        rv = get_section(&instring, &tmp);
+        *ptrs[j] = tmp;
+        
+        if (rv == '\0')
+        {
+            break;
+        }
+    }
 }
 
 // builds a response header given a status and a message
@@ -254,7 +236,7 @@ char * handleHeaders(char * request, size_t * length)
     char * protocol;
     char * response;
     
-    readHeader(&method, &path, &protocol, request); // read header
+    parseRequest(&method, &path, &protocol, request); // read header
     
     #if DEBUG
     printf("%s %s %s\n", method, path, protocol);
@@ -587,7 +569,7 @@ int main(int argc, char * argv[])
     {
         error("ERROR opening socket");
     }
-    bzero((char *) &serv_addr, sizeof(serv_addr));
+    memset(&serv_addr, 0, sizeof(serv_addr));
     
     serv_addr.sin_family = AF_INET;
     serv_addr.sin_addr.s_addr = INADDR_ANY;
@@ -636,7 +618,7 @@ int main(int argc, char * argv[])
         {
             bufstart = buffer + readlen;
             
-            bzero(bufstart, buflen - readlen);
+            memset(bufstart, 0, buflen - readlen);
             
             n = read(newsockfd, bufstart, buflen - readlen);
             if (n < 0)

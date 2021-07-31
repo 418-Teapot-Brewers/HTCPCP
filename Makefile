@@ -24,4 +24,4 @@ install: htcpcpd
 	cp htcpcpd /usr/local/bin/
 
 clean:
-	rm -f htcpcpd
+	rm -f htcpcpd $(O_FILES)
