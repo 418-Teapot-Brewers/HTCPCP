@@ -1,26 +1,25 @@
+#include "htcpcpd.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <netinet/in.h>
 #include <time.h>
 #include <signal.h>
 #include <fcntl.h>
 #include <pthread.h>
 
+#include "wrappers.h"
+
 // not entirely sure all these headers are needed, but the project this is based on had them so ¯\_(ツ)_/¯
 
 // ----------------------------
 
 // status codes that the server can return and corresponsing struct definition
-
-typedef struct
-{
-    unsigned short status;
-    char message[32];
-} Code;
 
 const Code codes[] = {
     { 102, "Processing" },
@@ -40,85 +39,55 @@ void delay(unsigned int millis)
     while (clock() < start_time + millis);
 }
 
-// struct for making file handling easier and function for loading files safely (I think this is using GNU extensions,
-// so if you compile this with something else then you're on your own)
-
-typedef struct
+void load_file(char * filename, loaded_file * dest)
 {
-    char * filedata;
-    size_t filesize;
-} loaded_file;
-
-void load_file(char * filename, loaded_file * dest, char * method)
-{
-    FILE * file;
+    off_t fsize, rv;
     static const char files_dir[] = "www";
-    size_t fsize, rv;
+    struct stat stbuf;
+    int fd;
     char * buf;
     char filename_qualified[strlen(files_dir) + strlen(filename) + 2];
     
     sprintf(filename_qualified, "%s/%s", files_dir, filename);
-    file = fopen(filename_qualified, method);
-    
-    if (file == NULL)
+    fd = open(filename_qualified, O_RDONLY);
+    if (fd == -1)
     {
-        dest->filedata = NULL;
-        dest->filesize = 0;
-        return;
+        goto err;
     }
     
-    fseek(file, 0, SEEK_END);
-    fsize = ftell(file);
-    rewind(file);
+    if ((fstat(fd, &stbuf) != 0) || (!S_ISREG(stbuf.st_mode)))
+    {
+        close(fd);
+        goto err;
+    }
+    
+    fsize = stbuf.st_size;
     
     buf = malloc(fsize);
     
     if (buf == NULL)
     {
-        dest->filedata = NULL;
-        dest->filesize = 0;
-        fclose(file);
-        return;
+        close(fd);
+        goto err;
     }
     
-    rv = fread(buf, sizeof(char), fsize, file);
+    rv = read(fd, buf, fsize);
     if (rv != fsize)
     {
+        close(fd);
         free(buf);
-        dest->filedata = NULL;
-        dest->filesize = 0;
-    }
-    else
-    {
-        dest->filedata = buf;
-        dest->filesize = fsize;
+        goto err;
     }
     
-    fclose(file);
+    dest->filedata = buf;
+    dest->filesize = fsize;
+    return;
     
+err:
+    dest->filedata = NULL;
+    dest->filesize = 0;
     return;
 }
-
-// data type and enum definitions for all the files that the site will handle
-
-typedef enum
-{
-    TERMINATOR = 0,
-    BIN,
-    TEXT,
-    NOPE,
-    REDIR,
-} ContentType;
-
-typedef struct
-{
-    char * filepath;
-    char * serverpath;
-    char * mime;
-    loaded_file file;
-    ContentType type;
-    unsigned short status;
-} UsedFile;
 
 UsedFile files[] = {
     { "index.html", "/index.html", "text/html", {}, TEXT, 418 }, // main page, returns status 418, file on disk is index.html
@@ -152,18 +121,6 @@ void sig_handler(int signo)
     pthread_join(HWThread, NULL);
     exit(0);
 }
-
-// struct for storing info about the current coffee pot; this could probably be made const but eh
-
-typedef struct
-{
-    unsigned char ready : 1;
-    unsigned char is_brewing : 1;
-    unsigned char is_pouring_milk : 1;
-    unsigned char is_teapot : 1;
-    unsigned char milk_available : 1;
-    time_t lastbrew;
-} pot;
 
 pot potinfo;
 
@@ -240,14 +197,18 @@ void readHeader(char ** method, char ** path, char ** protocol, char * instring)
             }
             
             bufsize *= 2;
-            tmp = realloc(tmp, bufsize); // I *think* this implementation doesn't have any memory leaks
+            tmp = realloc_wrapper_ignore(tmp, bufsize); // I *think* this implementation doesn't have any memory leaks
             
             if (tmp == NULL)
+            {
                 break;
+            }
         }
         
         if (tmp != NULL) // pointers are checked when the function returns so this is safer than it looks
-            tmp = realloc(tmp, strlen(tmp) + 1);
+        {
+            tmp = realloc_wrapper_shrink(tmp, strlen(tmp) + 1);
+        }
         
         *ptrs[j] = tmp;
         
@@ -275,11 +236,7 @@ char * buildResponse(unsigned short status, char * message)
     
     msgLen = snprintf(NULL, 0, format, cur_code->status, cur_code->message, message) + 1;
     
-    response = malloc(msgLen);
-    if (response == NULL)
-    {
-        error("Out of memory");
-    }
+    response = malloc_wrapper(msgLen);
     
     snprintf(response, msgLen, format, cur_code->status, cur_code->message, message);
     
@@ -388,6 +345,7 @@ char * handleHeaders(char * request, size_t * length)
                 char * header;
                 char * msg;
                 char * buf;
+                size_t len;
                 
                 headerLen = snprintf(NULL, 0, format, cur_file->file.filesize, cur_file->mime) + 1;
                 
@@ -419,9 +377,13 @@ char * handleHeaders(char * request, size_t * length)
                     else
                     {
                         strcpy(buf, msg);
-                        strcat(buf, cur_file->file.filedata); // text so strcat can be used
+                        
+                        len = strlen(buf); // binary so strcat can't be used
+                        memcpy(buf + strlen(buf), cur_file->file.filedata, cur_file->file.filesize);
                         
                         free(msg);
+                        // server tries to autodetect length if it's not set, but it uses strlen which won't work for data that isn't null-terminated
+                        *length = len + cur_file->file.filesize;
                         
                         response = buf;
                     }
@@ -471,7 +433,7 @@ char * handleHeaders(char * request, size_t * length)
                         memcpy(buf + strlen(buf), cur_file->file.filedata, cur_file->file.filesize);
                         
                         free(msg);
-                        // server tries to autodetect length if it's not set, but it uses strlen which won't work for images
+                        // server tries to autodetect length if it's not set, but it uses strlen which won't work for data that isn't null-terminated
                         *length = len + cur_file->file.filesize;
                         
                         response = buf;
@@ -607,7 +569,7 @@ int main(int argc, char * argv[])
     {
         if (cur_file->filepath != NULL && cur_file->type != REDIR)
         {
-            load_file(cur_file->filepath, &cur_file->file, (cur_file->type == TEXT) ? "r" : "rb");
+            load_file(cur_file->filepath, &cur_file->file);
             if (cur_file->file.filesize == 0)
             {
                 char msgbuf[25 + strlen(cur_file->filepath)];
@@ -661,11 +623,7 @@ int main(int argc, char * argv[])
         buflen = 256;
         readlen = 0;
         
-        buffer = malloc(buflen);
-        if (buffer == NULL)
-        {
-            error("ERROR out of memory on accept");
-        }
+        buffer = malloc_wrapper(buflen);
         
         // fun memory stuff to handle requests larger than 256 bytes!
         // dunno why I felt the need to implement this, it's complicated and goes entirely unused
@@ -697,7 +655,7 @@ int main(int argc, char * argv[])
             
             buflen *= 2;
             
-            buffer = realloc(buffer, buflen);
+            buffer = realloc_wrapper_ignore(buffer, buflen);
             if (buffer == NULL)
                 break;
         }
@@ -708,7 +666,7 @@ int main(int argc, char * argv[])
             continue;
         }
         
-        buffer = realloc(buffer, strlen(buffer) + 1);
+        buffer = realloc_wrapper_shrink(buffer, strlen(buffer) + 1);
         
         // process the incoming request
         

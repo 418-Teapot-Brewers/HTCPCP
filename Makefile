@@ -1,5 +1,5 @@
 CC=gcc
-CFLAGS=--std=gnu17 -Wall
+CFLAGS=--std=gnu17 -Wall -fstack-protector-all
 LDFLAGS=-pthread
 
 ifeq ($(DEBUG),1)
@@ -10,8 +10,15 @@ endif
 
 all: htcpcpd
 
-htcpcpd: src/htcpcpd.c
-	$(CC) $(CFLAGS) $(LDFLAGS) src/htcpcpd.c -o htcpcpd
+C_FILES := $(wildcard src/*.c)
+H_FILES := $(wildcard src/*.h)
+O_FILES := $(C_FILES:.c=.o)
+
+htcpcpd: $(O_FILES)
+	$(CC) $(CFLAGS) $(LDFLAGS) $(O_FILES) -o htcpcpd
+
+%.o: %.c %.h
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ -c $<
 
 install: htcpcpd
 	cp htcpcpd /usr/local/bin/
