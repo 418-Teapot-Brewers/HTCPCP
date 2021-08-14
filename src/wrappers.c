@@ -13,6 +13,14 @@ void * malloc_wrapper(size_t size)
     return tmp;
 }
 
+void * calloc_wrapper(size_t nmemb, size_t size)
+{
+    void * tmp = calloc(nmemb, size);
+    if (tmp == NULL)
+        error("Out of memory");
+    return tmp;
+}
+
 void * realloc_wrapper_shrink(void * old_ptr, size_t new_size)
 {
     void * tmp = realloc(old_ptr, new_size);

@@ -21,7 +21,7 @@
 
 // status codes that the server can return and corresponsing struct definition
 
-const Code codes[] = {
+static const Code codes[] = {
     { 102, "Processing" },
     { 200, "OK" },
     { 301, "Moved permanently" },
@@ -32,7 +32,7 @@ const Code codes[] = {
     { 0xFFFF, "Terminator" },
 };
 
-void delay(unsigned int millis)
+static void delay(unsigned int millis)
 {
     clock_t start_time = clock();
     
@@ -89,7 +89,7 @@ err:
     return;
 }
 
-UsedFile files[] = {
+static UsedFile files[] = {
     { "index.html", "/index.html", "text/html", {}, TEXT, 418 }, // main page, returns status 418, file on disk is index.html
     { "frens.html", "/frens.html", "text/html", {}, TEXT, 200 }, // frens page, returns status 200, file on disk is frens.html
     { "images/fren0.png", "/images/fren0.png", "image/png", {}, BIN, 200 }, // images
@@ -105,16 +105,18 @@ UsedFile files[] = {
 
 // now for the HTCPCP code! very little of this is tested, since our server is a teapot
 
-unsigned int time_to_brew = 1800;
-unsigned short port = 80;
+static unsigned int time_to_brew = 1800;
+static unsigned short port = 80;
 
 // stuff for threads that I copied from another implementation
 
-unsigned char closeThread = 0;
-pthread_t HWThread;
-int sockfd;
+static unsigned char closeThread = 0;
+static pthread_t HWThread;
+static int sockfd;
 
-void sig_handler(int signo)
+static const size_t max_threads = 10;
+
+static void sig_handler(int signo)
 {
     closeThread = 1;
     close(sockfd);
@@ -122,11 +124,11 @@ void sig_handler(int signo)
     exit(0);
 }
 
-pot potinfo;
+static pot potinfo;
 
 // brew a cup of coffee
 
-unsigned char brew(void)
+static unsigned char brew(void)
 {
     if (potinfo.ready == 1)
     {
@@ -140,7 +142,7 @@ unsigned char brew(void)
 
 // self-explanatory, really
 
-unsigned char say_when(void)
+static unsigned char say_when(void)
 {
     if (potinfo.is_pouring_milk == 1)
     {
@@ -152,13 +154,13 @@ unsigned char say_when(void)
 
 // whoops!
 
-void error(const char * msg)
+__attribute__ ((noreturn)) void error(const char * msg)
 {
     perror(msg);
     exit(1);
 }
 
-char get_section(char ** string, char ** dest)
+static char get_section(char ** string, char ** dest)
 {
     size_t len;
 	
@@ -176,7 +178,7 @@ char get_section(char ** string, char ** dest)
 	return **string;
 }
 
-void parseRequest(char ** method, char ** path, char ** protocol, char * instring)
+static void parseRequest(char ** method, char ** path, char ** protocol, char * instring)
 {
     char * tmp;
     char ** ptrs[] = { method, path, protocol };
@@ -202,7 +204,7 @@ void parseRequest(char ** method, char ** path, char ** protocol, char * instrin
 // builds a response header given a status and a message
 // e.g. HTTP/1.1 418 I'm a teapot
 
-char * buildResponse(unsigned short status, char * message)
+static char * buildResponse(unsigned short status, char * message)
 {
     char * response;
     static const char format[] = "HTTP/1.1 %d %s\n%s";
@@ -229,7 +231,7 @@ char * buildResponse(unsigned short status, char * message)
 // parameters are the request string and a pointer to the length of the output string,
 // and it returns a pointer to the output string, because this is the way I did it
 
-char * handleHeaders(char * request, size_t * length)
+static char * handleHeaders(char * request, size_t * length)
 {
     char * method;
     char * path;
@@ -487,7 +489,7 @@ char * handleHeaders(char * request, size_t * length)
 // for now, it's just dummy stuff that messes around with variables
 // feel free to add your own code in here to interface with your coffee pot
 
-void * hardwareHandler(void * arg)
+static void * hardwareHandler(void * arg)
 {
     while (1)
     {
@@ -518,19 +520,95 @@ void * hardwareHandler(void * arg)
     pthread_exit(NULL);
 }
 
-// program entrypoint
+// handler thread function
 
-int main(int argc, char * argv[])
+static void * handle_request(void * param)
 {
-    int newsockfd;
-    socklen_t clilen;
     char * buffer;
-    struct sockaddr_in serv_addr, cli_addr;
     int n;
     size_t buflen;
     size_t readlen;
     char * bufstart;
+    size_t return_length;
+    char * return_header;
+    StructPack * data = param;
+    
+    buflen = 256;
+    readlen = 0;
+    
+    buffer = malloc_wrapper(buflen);
+    
+    // fun memory stuff to handle requests larger than 256 bytes!
+    // dunno why I felt the need to implement this, it's complicated and goes entirely unused
+    // I guess to make it easier to expand this in the future? eh
+    // this (and the other similar code in the readHeaders function) is implemented kind of like a vector
+    // it reads in bytes until the buffer is full, then doubles the size of the buffer
+    // seems to work, but this is computer science, so don't trust this to be secure
+    
+    while (1)
+    {
+        bufstart = buffer + readlen;
+        
+        memset(bufstart, 0, buflen - readlen);
+        
+        n = read(data->fd, bufstart, buflen - readlen);
+        if (n < 0)
+        {
+            //error("ERROR reading from socket");
+            // don't error on read fail! just try again!
+            free(buffer);
+            buffer = NULL;
+            break;
+        }
+        
+        readlen = buflen;
+        
+        if (buffer[buflen - 1] == '\0')
+            break;
+        
+        buflen *= 2;
+        
+        buffer = realloc_wrapper_ignore(buffer, buflen);
+        if (buffer == NULL)
+            break;
+    }
+    
+    if (buffer == NULL)
+    {
+        //error("ERROR out of memory on accept");
+        goto end;
+    }
+    
+    buffer = realloc_wrapper_shrink(buffer, strlen(buffer) + 1);
+    
+    // process the incoming request
+    
+    return_length = 0;
+    return_header = handleHeaders(buffer, &return_length);
+    
+    // send a response
+    
+    n = write(data->fd, return_header, return_length);
+    free(return_header);
+    free(buffer);
+    
+end:
+    close(data->fd);
+    
+    data->inUse = 0;
+    
+    pthread_exit(NULL);
+    
+    return NULL;
+}
+
+// program entrypoint
+
+int main(int argc, char * argv[])
+{
+    struct sockaddr_in serv_addr;
     UsedFile * cur_file;
+    StructPack * threads;
     
     printf("HTTP/1.1 server starting\n");
     
@@ -588,84 +666,31 @@ int main(int argc, char * argv[])
     //daemon(1, 0);
     pthread_create(&HWThread, NULL, hardwareHandler, NULL);
     
+    threads = calloc_wrapper(max_threads, sizeof(StructPack));
+    
     for(;;)
     {
-        size_t return_length;
-        char * return_header;
+        static socklen_t clilen = sizeof(struct sockaddr_in);
+        size_t cur_thread = 0;
+        
+        while (threads[cur_thread].inUse != 0)
+        {
+            cur_thread++;
+            cur_thread %= max_threads;
+        }
         
         listen(sockfd, 5);
-        clilen = sizeof(cli_addr);
-        newsockfd = accept(sockfd, (struct sockaddr *) &cli_addr, &clilen);
+        threads[cur_thread].fd = accept(sockfd, (struct sockaddr *)&threads[cur_thread].cli_addr, &clilen);
         
-        if (newsockfd < 0)
+        if (threads[cur_thread].fd < 0)
         {
-            error("ERROR on accept");
-        }
-        
-        buflen = 256;
-        readlen = 0;
-        
-        buffer = malloc_wrapper(buflen);
-        
-        // fun memory stuff to handle requests larger than 256 bytes!
-        // dunno why I felt the need to implement this, it's complicated and goes entirely unused
-        // I guess to make it easier to expand this in the future? eh
-        // this (and the other similar code in the readHeaders function) is implemented kind of like a vector
-        // it reads in bytes until the buffer is full, then doubles the size of the buffer
-        // seems to work, but this is computer science, so don't trust this to be secure
-        
-        while (1)
-        {
-            bufstart = buffer + readlen;
-            
-            memset(bufstart, 0, buflen - readlen);
-            
-            n = read(newsockfd, bufstart, buflen - readlen);
-            if (n < 0)
-            {
-                //error("ERROR reading from socket");
-                // don't error on read fail! just try again!
-                free(buffer);
-                buffer = NULL;
-                break;
-            }
-            
-            readlen = buflen;
-            
-            if (buffer[buflen - 1] == '\0')
-                break;
-            
-            buflen *= 2;
-            
-            buffer = realloc_wrapper_ignore(buffer, buflen);
-            if (buffer == NULL)
-                break;
-        }
-        
-        if (buffer == NULL)
-        {
-            //error("ERROR out of memory on accept");
+            //error("ERROR on accept");
             continue;
         }
         
-        buffer = realloc_wrapper_shrink(buffer, strlen(buffer) + 1);
+        threads[cur_thread].inUse = 1;
         
-        // process the incoming request
-        
-        return_length = 0;
-        return_header = handleHeaders(buffer, &return_length);
-        
-        // send a response
-        
-        n = write(newsockfd, return_header, return_length);
-        free(return_header);
-        free(buffer);
-        
-        /*if (n < 0) 
-        {
-            error("ERROR writing to socket");
-        }*/
-        close(newsockfd);
+        pthread_create(&threads[cur_thread].thread, NULL, handle_request, &threads[cur_thread]);
     }
     
     close(sockfd);

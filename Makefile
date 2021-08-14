@@ -8,6 +8,10 @@ else
 	CFLAGS += -O3
 endif
 
+ifeq ($(LOGGING),1)
+	CFLAGS += -DLOGGING
+endif
+
 all: htcpcpd
 
 C_FILES := $(wildcard src/*.c)

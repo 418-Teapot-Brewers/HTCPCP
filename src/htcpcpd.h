@@ -8,6 +8,7 @@
 
 #include <stddef.h>
 #include <time.h>
+#include <netinet/in.h>
 
 typedef struct
 {
@@ -50,5 +51,13 @@ typedef struct
     time_t lastbrew;
 } pot;
 
+typedef struct
+{
+    pthread_t thread;
+    struct sockaddr_in cli_addr;
+    int fd;
+    unsigned char inUse;
+} StructPack;
+
 void load_file(char * filename, loaded_file * dest);
-void error(const char * msg);
+__attribute__ ((noreturn)) void error(const char * msg);
