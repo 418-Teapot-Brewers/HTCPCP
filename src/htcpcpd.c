@@ -106,7 +106,7 @@ static UsedFile files[] = {
 // now for the HTCPCP code! very little of this is tested, since our server is a teapot
 
 static unsigned int time_to_brew = 1800;
-static unsigned short port = 80;
+static unsigned short port = 25565;
 
 // stuff for threads that I copied from another implementation
 
